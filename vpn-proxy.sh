@@ -69,7 +69,7 @@ function get_config(){
     qrencode_exist=$(which qrencode)
     if [[ -n "$qrencode_exist" ]];then
         log "\n==========================================================="
-        cat "$config_path" | sed -E 's/ListenPort = [0-9]+//g' | qrencode -t ANSI
+        cat "$config_path" | sed -E 's/ListenPort = [0-9]+//g' | qrencode -t ANSIUTF8 -m 2
         log "\n==========================================================="
     fi
 }
