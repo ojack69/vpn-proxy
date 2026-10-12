@@ -1,5 +1,4 @@
 import os
-import pwd
 from pathlib import Path
 
 import pytest
@@ -9,6 +8,7 @@ from vpn_proxy import settings
 
 @pytest.fixture
 def me():
+    pwd = pytest.importorskip("pwd")
     return pwd.getpwuid(os.getuid())
 
 
@@ -22,6 +22,13 @@ def test_defaults_match_bash_script(me, monkeypatch):
     assert s.container_name == "wg-proxy-vpn-server"
     assert s.config_path == Path(me.pw_dir) / ".wg-proxy-vpn"
     assert s.user.uid == me.pw_uid
+
+
+def test_windows_user(monkeypatch):
+    monkeypatch.setattr(settings.sys, "platform", "win32")
+    u = settings.current_user()
+    assert u.home == Path.home()
+    assert (u.uid, u.gid) == (settings.DEFAULT_ID, settings.DEFAULT_ID)
 
 
 def test_toml_override(tmp_path):

@@ -72,7 +72,8 @@ def patch_file(path: Path, block: str) -> bool:
     """Patch `path` in place; returns True if it changed. Missing files are skipped."""
     if not path.is_file():
         return False
-    new, changed = patch(path.read_text(), block)
+    new, changed = patch(path.read_text(encoding="utf-8"), block)
     if changed:
-        path.write_text(new)
+        # Read by wg-quick inside the Linux container: never let Windows write CRLF
+        path.write_text(new, encoding="utf-8", newline="\n")
     return changed

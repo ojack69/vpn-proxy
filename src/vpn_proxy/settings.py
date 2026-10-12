@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import getpass
 import ipaddress
 import json
 import os
 import platform
-import pwd
 import socket
 import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -27,8 +28,16 @@ class User:
     gid: int
 
 
+# PUID/PGID for the linuxserver image when the host has no POSIX ids (Windows)
+DEFAULT_ID = 1000
+
+
 def current_user() -> User:
     """The invoking user, resolving through sudo so the config lands in their home."""
+    if sys.platform == "win32":
+        return User(name=getpass.getuser(), home=Path.home(), uid=DEFAULT_ID, gid=DEFAULT_ID)
+    import pwd
+
     name = os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
     entry = pwd.getpwnam(name)
     return User(name=entry.pw_name, home=Path(entry.pw_dir), uid=entry.pw_uid, gid=entry.pw_gid)
@@ -217,7 +226,9 @@ def save_overrides(path: Path, **values) -> None:
         else:
             data[k] = v
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(f"{k} = {_toml_value(v)}\n" for k, v in data.items()))
+    path.write_text(
+        "".join(f"{k} = {_toml_value(v)}\n" for k, v in data.items()), encoding="utf-8"
+    )
 
 
 def detect_host_ip(interface: str | None = None) -> str | None:

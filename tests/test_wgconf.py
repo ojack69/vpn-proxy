@@ -79,4 +79,5 @@ def test_patch_file(tmp_path):
     f = tmp_path / "wg0.conf"
     f.write_text(WG0)
     assert wgconf.patch_file(f, BLOCK) is True
+    assert b"\r" not in f.read_bytes()  # LF even on Windows: parsed by wg-quick
     assert wgconf.patch_file(f, BLOCK) is False

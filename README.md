@@ -118,5 +118,6 @@ Containers created by the old `vpn-proxy.sh` (default bridge, no labels, plus th
 - **Certificate pinning is out of scope**: this handles routing only.
 - **Only `redirected_tcp_ports` are redirected**. Everything else goes through the VPN untouched (`ALLOWEDIPS=0.0.0.0/0`).
 - **Host firewall (Linux, `loopback`/`bridge`)**: traffic enters the host on the `wg-proxy-vpn-server-net` bridge towards `172.31.80.1:<local_port>`, so the firewall must allow it. The TUI's "VPN → proxy" line shows `blocked` when it doesn't.
+- **Windows**: needs Docker Desktop (WSL2 backend). Allow inbound UDP `vpn_udp_port` in Windows Firewall, since the Docker Desktop backend publishes the port and its rule may be scoped to private networks only. `bridge` mode isn't available; `PUID`/`PGID` default to `1000`.
 - **macOS/Windows `loopback`** relies on Docker Desktop's `host.docker.internal` reaching services bound to the host's loopback. If it doesn't in your setup, use `custom` with the host's LAN IP.
 - Use only in **controlled assessment environments**: an exposed WireGuard server NAT'ing HTTP/HTTPS has real security implications if left running.

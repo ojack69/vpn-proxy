@@ -15,7 +15,7 @@ from docker.errors import DockerException, ImageNotFound, NotFound
 from docker.models.containers import Container
 
 from . import wgconf
-from .settings import Settings, detect_host_ip
+from .settings import Settings, detect_host_ip, is_linux
 
 WIREGUARD_IMAGE = "lscr.io/linuxserver/wireguard:latest"
 ROLE_LABEL = "vpn-proxy.role"
@@ -188,6 +188,10 @@ class Stack:
     def _create_wireguard(self, host_ip: str) -> Container:
         self.log(f"Creating WireGuard container (endpoint {host_ip}:{self.s.vpn_udp_port})", "info")
         self.s.wg_config_path.mkdir(parents=True, exist_ok=True)
+        volumes = {str(self.s.wg_config_path): {"bind": "/config", "mode": "rw"}}
+        if is_linux():
+            # Docker Desktop (macOS/Windows) can't mount it and its kernel has WireGuard built in
+            volumes["/lib/modules"] = {"bind": "/lib/modules", "mode": "ro"}
         return self._create(
             WIREGUARD_IMAGE,
             name=self.s.container_name,
@@ -208,10 +212,7 @@ class Stack:
                 "LOG_CONFS": "true",
             },
             ports={"51820/udp": self.s.vpn_udp_port},
-            volumes={
-                str(self.s.wg_config_path): {"bind": "/config", "mode": "rw"},
-                "/lib/modules": {"bind": "/lib/modules", "mode": "ro"},
-            },
+            volumes=volumes,
             sysctls={"net.ipv4.conf.all.src_valid_mark": "1"},
             network=self.s.network_name,
             networking_config=self._endpoint(self.s.wireguard_ip),
@@ -308,7 +309,7 @@ class Stack:
 
     def _has_hook(self) -> bool:
         wg0 = self.s.wg_config_path / "wg_confs" / "wg0.conf"
-        return wgconf.BEGIN in wg0.read_text()
+        return wgconf.BEGIN in wg0.read_text(encoding="utf-8")
 
     def stop(self) -> None:
         for c in (self.wireguard, self.forwarder, self._get(self.s.legacy_mitmproxy_name)):
@@ -329,7 +330,8 @@ class Stack:
             try:
                 shutil.rmtree(self.s.config_path)
             except PermissionError as e:
-                raise StackError(f"Can't remove {self.s.config_path} ({e}); re-run with sudo") from e
+                hint = "re-run with sudo" if is_linux() else "check no other process holds it open"
+                raise StackError(f"Can't remove {self.s.config_path} ({e}); {hint}") from e
             self.log(f"Removed {self.s.config_path}", "info")
 
     # --- runtime introspection -------------------------------------------------
@@ -348,9 +350,8 @@ class Stack:
         path = self.s.peer_config_path
         if not path.is_file():
             return None
-        return "\n".join(
-            l for l in path.read_text().splitlines() if not l.strip().startswith("ListenPort")
-        )
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return "\n".join(l for l in lines if not l.strip().startswith("ListenPort"))
 
     def wg_peers(self) -> list[PeerInfo] | None:
         out = self._exec("wg", "show", "wg0", "dump")

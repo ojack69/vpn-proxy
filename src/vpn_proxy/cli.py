@@ -21,6 +21,22 @@ def log(message: str, level: str = "info") -> None:
     print(f"{prefix}{message}")
 
 
+def setup_console() -> None:
+    """Windows: enable ANSI escapes on the legacy console, and keep the QR's block characters
+    from crashing on a non-UTF-8 code page when stdout is redirected."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+    mode = ctypes.c_uint32()
+    if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+        kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    if not sys.stdout.isatty():
+        sys.stdout.reconfigure(encoding="utf-8")
+
+
 def qr_text(data: str) -> str:
     buf = io.StringIO()
     segno.make(data, error="l").terminal(out=buf, compact=True, border=2)
@@ -134,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-y", "--yes", action="store_true", help="don't ask for confirmation")
     sub.add_parser("status", help="print the current state")
     args = parser.parse_args(argv)
+    setup_console()
 
     try:
         path = Path(args.settings) if args.settings else settings_mod.default_path()
