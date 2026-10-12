@@ -40,6 +40,19 @@ def test_toml_override(tmp_path):
     assert (s.gateway_ip, s.wireguard_ip, s.forwarder_ip) == ("10.99.0.1", "10.99.0.2", "10.99.0.3")
 
 
+def test_ports_normalized_and_validated(tmp_path):
+    assert load(tmp_path, redirected_tcp_ports=" 80 , 443 ").redirected_tcp_ports == "80,443"
+    assert load(tmp_path, redirected_tcp_ports="80,8000:8100").redirected_tcp_ports == "80,8000:8100"
+    with pytest.raises(ValueError, match="at least one port"):
+        load(tmp_path, redirected_tcp_ports=" , ")
+    with pytest.raises(ValueError, match="out of range"):
+        load(tmp_path, redirected_tcp_ports="80,70000")
+    with pytest.raises(ValueError, match="range"):
+        load(tmp_path, redirected_tcp_ports="443:80")
+    with pytest.raises(ValueError, match="at most 15"):
+        load(tmp_path, redirected_tcp_ports=",".join(str(p) for p in range(1, 17)))
+
+
 def test_unknown_key_rejected(tmp_path):
     f = tmp_path / "settings.toml"
     f.write_text("lcoal_port = 1\n")

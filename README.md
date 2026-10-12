@@ -72,7 +72,7 @@ Optional, in `~/.wg-proxy-vpn/settings.toml` (with sudo, `~` is `$SUDO_USER`'s h
 vpn_subnet = "10.80.80.0"         # WireGuard tunnel subnet
 vpn_udp_port = 51820              # UDP port exposed on the host
 vpn_peer_dns = "1.1.1.1"          # DNS pushed to the client
-redirected_tcp_ports = [80, 443]  # or "80,443"
+redirected_tcp_ports = [80, 443]  # or "80,443"; single ports or ranges (8000:8100)
 interface = "wlp1s0"              # endpoint interface; default: default-route interface
 redirect = "loopback"             # loopback | bridge | custom (see above)
 local_port = 8080                 # port your proxy (Burp/mitmproxy) listens on
@@ -103,6 +103,7 @@ Keys: `s` start · `x` stop · `c` client config + QR · `t` redirect target · 
 
 ```bash
 vpn-proxy start [--recreate] [--redirect loopback|bridge|custom] [--proxy-host H] [--local-port P]
+                [--redirected-ports 80,443,8000:8100]
                                # create/start, apply redirect hook, print client config + QR
                                # redirect flags are saved to settings.toml
 vpn-proxy stop
@@ -127,7 +128,7 @@ Containers created by the old `vpn-proxy.sh` (default bridge, no labels, plus th
 ## Notes
 
 - **Certificate pinning is out of scope**: this handles routing only.
-- **Only `redirected_tcp_ports` are redirected**. Everything else goes through the VPN untouched (`ALLOWEDIPS=0.0.0.0/0`).
+- **Only `redirected_tcp_ports` are redirected** (configurable; default `80,443`). Everything else goes through the VPN untouched (`ALLOWEDIPS=0.0.0.0/0`).
 - **Host firewall (Linux, `loopback`/`bridge`)**: traffic enters the host on the `wg-proxy-vpn-server-net` bridge towards `172.31.80.1:<local_port>`, so the firewall must allow it. The TUI's "VPN → proxy" line shows `blocked` when it doesn't.
 - **Windows**: needs Docker Desktop (WSL2 backend). Allow inbound UDP `vpn_udp_port` in Windows Firewall, since the Docker Desktop backend publishes the port and its rule may be scoped to private networks only. `bridge` mode isn't available; `PUID`/`PGID` default to `1000`.
 - **macOS/Windows `loopback`** relies on Docker Desktop's `host.docker.internal` reaching services bound to the host's loopback. If it doesn't in your setup, use `custom` with the host's LAN IP.

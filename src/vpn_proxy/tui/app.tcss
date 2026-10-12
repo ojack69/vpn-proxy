@@ -23,8 +23,6 @@ ConfirmScreen, ConfigScreen, TargetScreen {
 }
 
 #confirm {
-    grid-size: 1;
-    grid-rows: auto auto;
     width: 64;
     height: auto;
     padding: 1 2;
@@ -34,7 +32,8 @@ ConfirmScreen, ConfigScreen, TargetScreen {
 
 #question {
     width: 100%;
-    content-align: center middle;
+    height: auto;
+    text-align: center;
     margin-bottom: 1;
 }
 
