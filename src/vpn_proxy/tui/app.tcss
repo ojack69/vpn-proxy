@@ -1,0 +1,76 @@
+#panels {
+    grid-size: 3;
+    grid-gutter: 0 1;
+    height: auto;
+    padding: 0 1;
+}
+
+.panel {
+    border: round $primary;
+    padding: 0 1;
+    height: 100%;
+    min-height: 8;
+}
+
+#log {
+    border: round $secondary;
+    margin: 0 1;
+    height: 1fr;
+}
+
+ConfirmScreen, ConfigScreen, TargetScreen {
+    align: center middle;
+}
+
+#confirm {
+    grid-size: 1;
+    grid-rows: auto auto;
+    width: 64;
+    height: auto;
+    padding: 1 2;
+    border: thick $error;
+    background: $surface;
+}
+
+#question {
+    width: 100%;
+    content-align: center middle;
+    margin-bottom: 1;
+}
+
+#buttons {
+    height: auto;
+    align: center middle;
+}
+
+#buttons Button {
+    margin: 0 1;
+}
+
+#config {
+    width: auto;
+    max-width: 90%;
+    height: 90%;
+    padding: 1 2;
+    border: thick $primary;
+    background: $surface;
+}
+
+#qr {
+    width: auto;
+}
+
+#target {
+    grid-size: 1;
+    grid-rows: auto;
+    grid-gutter: 1 0;
+    width: 90;
+    height: auto;
+    padding: 1 2;
+    border: thick $primary;
+    background: $surface;
+}
+
+#mode {
+    width: 100%;
+}

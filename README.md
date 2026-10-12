@@ -1,6 +1,6 @@
 # wg-proxy-vpn
 
-A bash script that spins up a WireGuard VPN server in Docker and transparently redirects HTTP/HTTPS traffic from connected clients to a proxy of your choice (e.g. Burp Suite, mitmproxy). It's designed for **mobile application security assessments** — particularly Flutter apps — where traffic interception via standard system-proxy configuration is unreliable or ignored by the app.
+A TUI/CLI tool that spins up a WireGuard VPN server in Docker and transparently redirects HTTP/HTTPS traffic from connected clients to a proxy of your choice (e.g. Burp Suite, mitmproxy). It's designed for **mobile application security assessments** — particularly Flutter apps — where traffic interception via standard system-proxy configuration is unreliable or ignored by the app.
 
 > Based on: [Intercepting Flutter traffic on iOS — NVISO Labs](https://blog.nviso.eu/2020/06/12/intercepting-flutter-traffic-on-ios/)
 
@@ -8,130 +8,127 @@ A bash script that spins up a WireGuard VPN server in Docker and transparently r
 
 ## Why this exists
 
-Many mobile frameworks (Flutter being the classic example) don't respect the device's configured HTTP proxy — they open sockets directly, bypassing whatever proxy settings you've set on the OS or Wi-Fi network. That makes traditional "set a proxy on the device" interception useless.
-
-The workaround: instead of relying on the app to *use* a proxy, force **all** its outbound traffic through a VPN tunnel, then transparently redirect TCP traffic on ports 80/443 to your proxy at the network level (via `iptables` DNAT), regardless of whether the app knows a proxy exists.
+Many mobile frameworks (Flutter being the classic example) don't respect the device's configured HTTP proxy — they open sockets directly. Instead of relying on the app to *use* a proxy, all its traffic is forced through a VPN tunnel and TCP traffic on ports 80/443 is DNAT'ed to your proxy at the network level.
 
 ## How it works
 
-1. A [linuxserver/wireguard](https://docs.linuxserver.io/images/docker-wireguard/) container is created and configured as a WireGuard VPN server with a single peer.
-2. Your mobile device connects to this VPN using the generated peer configuration.
-3. `iptables` rules inside the container's network namespace:
-   - `DNAT` traffic on the configured TCP ports (default `80,443`) arriving on the `wg0` interface to your host proxy (`LOCAL_HOST:LOCAL_PORT`).
-   - Allow that forwarded traffic through `FORWARD`.
-   - `MASQUERADE` return traffic so replies find their way back to the client.
-4. Your proxy tool (Burp, mitmproxy, etc.), listening on the host, sees and can intercept/modify all HTTP/HTTPS traffic from the device — even though the app never explicitly configured a proxy.
+1. A dedicated Docker network (`wg-proxy-vpn-server-net`, default `172.31.80.0/24`) is created; containers get static IPs on it.
+2. A [linuxserver/wireguard](https://docs.linuxserver.io/images/docker-wireguard/) container is created with a single peer.
+3. The redirect rule is written as **wg-quick `PostUp`/`PostDown` hooks** into the server config (`templates/server.conf` and `wg_confs/wg0.conf`):
+   ```
+   iptables -t nat -A PREROUTING -i wg0 -p tcp -m multiport --dports 80,443 -j DNAT --to-destination <target>
+   ```
+   wg-quick re-applies it every time `wg0` comes up, so the redirect survives `docker restart`, daemon restarts and container crashes — not only restarts done through this tool. Return traffic is handled by the image's own `MASQUERADE -o eth+` hook.
+4. The redirect target is selectable (`redirect` setting, `start --redirect`, or `t` in the TUI):
 
-### macOS / Windows caveat
+| mode | your proxy listens on | how traffic gets there |
+|---|---|---|
+| `loopback` (default) | `127.0.0.1:<local_port>`, Burp's default | Linux: a `socat` forwarder in the host network namespace, bound **only** to the docker bridge IP (`172.31.80.1`) and accepting **only** the WireGuard container, relays to `127.0.0.1`. macOS/Windows: a `socat` container (`172.31.80.3:<relay_port>`) relays to `host.docker.internal:<local_port>`. |
+| `bridge` (Linux only) | `172.31.80.1` or `0.0.0.0` | DNAT straight to the bridge gateway, no forwarder |
+| `custom` | `<proxy_host>:<local_port>`, e.g. Burp on another machine | DNAT straight to that address, no forwarder |
 
-On non-Linux hosts, Docker runs inside a lightweight VM, so `iptables`-based routing to a proxy "on the host" doesn't behave the same way as on native Linux. To work around this, the script detects a non-Linux host OS and automatically spins up an **additional `mitmproxy` container** running in **upstream mode**, configured to forward everything to your host proxy (`http://LOCAL_HOST:LOCAL_PORT`). Traffic then flows:
+The forwarder is a plain TCP relay, not a proxy. Your proxy still sees the client's original TLS SNI/Host header, so invisible proxying works, and there is no second TLS interception.
 
 ```
-Mobile client → WireGuard container (iptables DNAT) → mitmproxy container (upstream mode) → Host proxy (Burp/mitmproxy/etc.)
+loopback:        client → WireGuard (DNAT) → socat forwarder → 127.0.0.1:8080 (Burp)
+bridge / custom: client → WireGuard (DNAT) → proxy
 ```
 
-On Linux, this extra hop is skipped entirely — traffic is DNAT'ed directly to the host proxy.
+Only the client endpoint (`SERVERURL`) depends on your LAN IP. If it changes, the tool flags the endpoint as stale and you can recreate the container. Keys are kept, and the peer config is re-rendered.
 
 ---
 
 ## Prerequisites
 
-- **Docker** installed and running (the script checks for both and exits if either is missing).
-- Root/sudo privileges are recommended (needed at least for `uninstall`, and generally for Docker + `NET_ADMIN`/`SYS_MODULE` capabilities).
-- A proxy tool already listening on the host at the configured `LOCAL_PORT` (default `8080`) — e.g. Burp Suite or mitmproxy — with **invisible/transparent proxying enabled**, since the client won't be sending standard proxy CONNECT requests.
-- A WireGuard client on the test device (mobile app, or `wg-quick` on desktop).
-- *(Optional)* `qrencode` installed on the host if you want the peer config rendered as a scannable QR code (handy for quickly importing onto a phone).
+- **Docker** running, and access to its socket (`docker` group or sudo).
+- [uv](https://docs.astral.sh/uv/).
+- An intercepting proxy with **invisible/transparent proxying** enabled. With the default `loopback` mode it can stay on `127.0.0.1:8080`.
+- A WireGuard client on the test device.
 
----
+## Install / run
+
+From a checkout:
+
+```bash
+uv run vpn-proxy              # TUI
+uv run vpn-proxy start        # or any subcommand
+```
+
+Installed on PATH as `vpn-proxy`:
+
+```bash
+pipx install .                                          # from a checkout
+pipx install git+https://github.com/ojack69/vpn-proxy.git
+uv tool install .                                       # same, with uv
+```
+
+`python -m vpn_proxy` also works.
 
 ## Configuration
 
-Before running, review and adjust the variables at the top of the script to match your environment:
+Optional, in `~/.wg-proxy-vpn/settings.toml` (with sudo, `~` is `$SUDO_USER`'s home). All keys are optional:
 
-| Variable | Default | Description |
-|---|---|---|
-| `VPN_SUBNET` | `10.80.80.0` | Internal subnet used for the VPN tunnel |
-| `VPN_UDP_PORT` | `51820` | UDP port WireGuard listens on (exposed on the host) |
-| `VPN_PEER_DNS` | `1.1.1.1` | DNS server pushed to VPN clients |
-| `REDIRECTED_TCP_PORTS` | `80,443` | TCP ports redirected to the proxy (comma-separated, used with `iptables --multiport`) |
-| `LOCAL_INTERFACE` | `wlp1s0` | **Must be changed** to match your host's active network interface (used to auto-detect `LOCAL_HOST` via `ifconfig`) |
-| `PROXY_PORT` | `8080` | Port used by the intermediate mitmproxy container (non-Linux hosts only) |
-| `LOCAL_PORT` | `8080` | Port your actual proxy tool (Burp/mitmproxy) is listening on, on the host |
-| `CONTAINER_NAME` | `wg-proxy-vpn-server` | Name of the WireGuard Docker container |
-
-`LOCAL_HOST` is auto-detected from `LOCAL_INTERFACE` via `ifconfig`; double-check it resolves correctly on your system (in particular, confirm `wlp1s0` matches your machine's actual interface name — use `ip a` or `ifconfig` to check).
-
-Peer configuration files, keys, and logs are persisted under:
-
-```
-/home/<user>/.wg-proxy-vpn
+```toml
+vpn_subnet = "10.80.80.0"         # WireGuard tunnel subnet
+vpn_udp_port = 51820              # UDP port exposed on the host
+vpn_peer_dns = "1.1.1.1"          # DNS pushed to the client
+redirected_tcp_ports = [80, 443]  # or "80,443"
+interface = "wlp1s0"              # endpoint interface; default: default-route interface
+redirect = "loopback"             # loopback | bridge | custom (see above)
+local_port = 8080                 # port your proxy (Burp/mitmproxy) listens on
+proxy_host = "192.168.1.50"       # proxy address, redirect = custom only
+relay_port = 8080                 # socat container port (non-Linux loopback only)
+container_name = "wg-proxy-vpn-server"
+docker_subnet = "172.31.80.0/24"  # gateway .1, wireguard .2, forwarder .3
 ```
 
-(`<user>` resolves to `$SUDO_USER` if run with `sudo`, otherwise `$USER`.)
+Keys, peer configs and server config live in `~/.wg-proxy-vpn/config` (mounted as `/config`).
 
 ---
 
 ## Usage
 
+### TUI
+
+`uv run vpn-proxy` shows live:
+
+- **Server**: container state, host IP, client endpoint, legacy/stale-endpoint warnings.
+- **Peer**: last handshake, client source address, rx/tx.
+- **Redirect**: mode, DNAT target, whether the rule is present and its packet/byte counters (proof traffic is actually being redirected), whether your proxy is listening, and whether the WireGuard container can actually reach it (`nc -z` from inside, i.e. the full path including the forwarder and the host firewall).
+- **Log**: actions and Docker events. After any start of the WireGuard container, including one done outside the tool, it checks that the redirect rule is back.
+
+Keys: `s` start · `x` stop · `c` client config + QR · `t` redirect target · `r` recreate · `u` uninstall · `q` quit.
+
+### CLI
+
 ```bash
-./vpn-proxy.sh [start|stop|config|uninstall]
+vpn-proxy start [--recreate] [--redirect loopback|bridge|custom] [--proxy-host H] [--local-port P]
+                               # create/start, apply redirect hook, print client config + QR
+                               # redirect flags are saved to settings.toml
+vpn-proxy stop
+vpn-proxy config               # client config (ListenPort stripped) + QR code
+vpn-proxy status
+vpn-proxy uninstall [-y]       # remove containers, network, keys and config (irreversible)
 ```
-
-### `start`
-
-- If the WireGuard container doesn't exist yet, creates it:
-  - Creates the config directory (`~/.wg-proxy-vpn`).
-  - On non-Linux hosts, also creates and starts a `mitmproxy` container in upstream mode pointing at your host proxy.
-  - Runs the `linuxserver/wireguard` container with `NET_ADMIN`/`SYS_MODULE` capabilities, one peer, and the settings above.
-  - Waits a few seconds for the server to initialize, then prints the generated peer config (see `config` below).
-- Starts (or re-starts) the WireGuard container (and the mitmproxy container, if present).
-- (Re-)applies the `iptables` DNAT/FORWARD/MASQUERADE rules described above.
-- Prints a reminder about the expected host/port and to enable invisible/transparent proxying in your proxy tool.
 
 **Typical workflow:**
 
-1. Start your proxy (e.g. Burp Suite) listening on `LOCAL_PORT`, with invisible proxying enabled.
-2. Run `./vpn-proxy.sh start`.
-3. Import the printed/QR peer config into the WireGuard app on your test device.
-4. Connect the device to the VPN.
-5. Install/trust your proxy's CA certificate on the test device (still required for HTTPS interception — this script only handles traffic *routing*, not certificate trust or pinning bypass).
-6. Use the target app; its HTTP/HTTPS traffic on the redirected ports should now appear in your proxy.
+1. Start Burp on `127.0.0.1:8080` (the default) with invisible proxying.
+2. `vpn-proxy start`, then scan the QR code with the WireGuard app.
+3. Install/trust the proxy CA on the device (pinning bypass is out of scope).
+4. Use the app; the TUI's DNAT counter should increase and traffic should appear in Burp.
 
-### `stop`
+### Migrating from the bash script
 
-Stops the WireGuard container and the mitmproxy container (if it exists), without deleting any configuration.
-
-### `config`
-
-Prints the existing peer configuration file (`peer1.conf`) with the `ListenPort` line stripped out, plus a QR code rendering of it if `qrencode` is installed. Useful if you need to re-import the config on another device without recreating the server. Fails with an error if the server hasn't been set up yet.
-
-### `uninstall`
-
-- Prompts for confirmation (`y/N`).
-- **Requires root** (exits if `$EUID -ne 0`).
-- Deletes the entire `~/.wg-proxy-vpn` config directory.
-- Stops and removes both the WireGuard container and the mitmproxy container.
-
-This is destructive and irreversible — all peer keys and configuration are lost.
+Containers created by the old `vpn-proxy.sh` (default bridge, no labels, plus the `-mitmproxy` relay) are detected as legacy. Run `vpn-proxy start --recreate` (or `r` in the TUI): the containers are replaced, and `~/.wg-proxy-vpn` (keys, peer) is reused.
 
 ---
 
-## Notes, caveats & troubleshooting
+## Notes
 
-- **Certificate pinning is out of scope.** This script solves traffic *routing/redirection*, not certificate trust. Apps with certificate pinning will still need a separate bypass (e.g. Frida scripts, patched binaries) in addition to this setup.
-- **Only TCP ports listed in `REDIRECTED_TCP_PORTS` are redirected.** Traffic on other ports/protocols passes through the VPN normally (subject to `ALLOWEDIPS=0.0.0.0/0`) but isn't touched by the proxy redirection rules.
-- **`LOCAL_INTERFACE` must be correct**, or `LOCAL_HOST` will resolve to nothing/incorrect data and the whole redirection chain breaks. Verify with `ip a` / `ifconfig` before running.
-- **Re-running `start`** re-applies the `iptables` rules each time (they are appended, not replaced) — if you restart the script repeatedly without a `stop`/container recreation, you may end up with duplicate NAT rules. If you suspect this, `stop` and recreate the container, or clear the rules manually with `docker exec <container> iptables -t nat -F`.
-- **Docker must already be running** before invoking the script; the script exits early with an error if `docker ps` fails or `docker` isn't found.
-- **Enable "invisible" / transparent proxying** in your interception proxy (e.g. Burp Suite's "Support invisible proxying" option) — since clients are being transparently redirected rather than explicitly configured to use a proxy, they won't send proxy-style requests (e.g. absolute-form HTTP requests or CONNECT).
-- Intended for use in **controlled security assessment environments** — exposing a WireGuard server with `ALLOWEDIPS=0.0.0.0/0` and NAT'ing all HTTP/HTTPS traffic through it has real security implications if left running outside that context.
-
----
-
-## Requirements summary
-
-- Docker
-- WireGuard client on the test device
-- A host-based intercepting proxy (Burp Suite, mitmproxy, etc.)
-- `qrencode` (optional, for QR-based config import)
-- Linux host recommended for the simplest routing path; macOS/Windows supported via an automatic mitmproxy relay
+- **Certificate pinning is out of scope**: this handles routing only.
+- **Only `redirected_tcp_ports` are redirected**. Everything else goes through the VPN untouched (`ALLOWEDIPS=0.0.0.0/0`).
+- **Host firewall (Linux, `loopback`/`bridge`)**: traffic enters the host on the `wg-proxy-vpn-server-net` bridge towards `172.31.80.1:<local_port>`, so the firewall must allow it. The TUI's "VPN → proxy" line shows `blocked` when it doesn't.
+- **Windows**: needs Docker Desktop (WSL2 backend). Allow inbound UDP `vpn_udp_port` in Windows Firewall, since the Docker Desktop backend publishes the port and its rule may be scoped to private networks only. `bridge` mode isn't available; `PUID`/`PGID` default to `1000`.
+- **macOS/Windows `loopback`** relies on Docker Desktop's `host.docker.internal` reaching services bound to the host's loopback. If it doesn't in your setup, use `custom` with the host's LAN IP.
+- Use only in **controlled assessment environments**: an exposed WireGuard server NAT'ing HTTP/HTTPS has real security implications if left running.
