@@ -39,7 +39,7 @@ def setup_console() -> None:
 
 def qr_text(data: str) -> str:
     buf = io.StringIO()
-    segno.make(data, error="l").terminal(out=buf, compact=True, border=2)
+    segno.make(data, error="l").terminal(out=buf, compact=True, border=1)
     return buf.getvalue()
 
 
@@ -144,6 +144,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--proxy-host", help="proxy address for --redirect custom (saved)")
     p.add_argument("--local-port", type=int, help="proxy listening port (saved)")
+    p.add_argument(
+        "--redirected-ports",
+        dest="redirected_tcp_ports",
+        help="comma-separated TCP ports/ranges to redirect, e.g. 80,443,8000:8100 "
+        "(default 80,443). Saved to the settings file.",
+    )
     sub.add_parser("stop", help="stop the containers")
     sub.add_parser("config", help="print the client config and QR code")
     p = sub.add_parser("uninstall", help="remove containers, network and config")
@@ -158,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             "redirect": getattr(args, "redirect", None),
             "proxy_host": getattr(args, "proxy_host", None),
             "local_port": getattr(args, "local_port", None),
+            "redirected_tcp_ports": getattr(args, "redirected_tcp_ports", None),
         }
         s = settings_mod.load(path, **flags)  # validates before anything is persisted
         if any(v is not None for v in flags.values()):

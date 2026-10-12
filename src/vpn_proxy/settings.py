@@ -79,6 +79,7 @@ class Settings:
     def __post_init__(self) -> None:
         if isinstance(self.redirected_tcp_ports, (list, tuple)):
             self.redirected_tcp_ports = ",".join(str(p) for p in self.redirected_tcp_ports)
+        self.redirected_tcp_ports = normalize_ports(self.redirected_tcp_ports)
         ipaddress.ip_network(self.docker_subnet)  # fail early on a malformed subnet
         if self.redirect not in REDIRECT_MODES:
             raise ValueError(f"redirect must be one of {', '.join(REDIRECT_MODES)}")
@@ -177,6 +178,39 @@ class Settings:
             ],
             host_network=False,
         )
+
+
+def _port(value: str) -> int:
+    n = int(value)
+    if not 1 <= n <= 65535:
+        raise ValueError(f"port out of range (1-65535): {value}")
+    return n
+
+
+def normalize_ports(spec: str) -> str:
+    """Validate a comma-separated iptables multiport `--dports` spec and canonicalize it.
+
+    Accepts single ports (`80`) and ranges (`8000:8100`); strips whitespace and
+    rejects empty or malformed entries. iptables multiport allows at most 15 ports,
+    counting each range endpoint, so enforce that too."""
+    entries = [e.strip() for e in str(spec).split(",") if e.strip()]
+    if not entries:
+        raise ValueError("redirected_tcp_ports must list at least one port")
+    count = 0
+    out = []
+    for e in entries:
+        if ":" in e:
+            lo, hi, *rest = e.split(":")
+            if rest or _port(lo) > _port(hi):
+                raise ValueError(f"invalid port range: {e}")
+            out.append(f"{_port(lo)}:{_port(hi)}")
+            count += 2
+        else:
+            out.append(str(_port(e)))
+            count += 1
+    if count > 15:
+        raise ValueError("iptables multiport allows at most 15 ports (ranges count as 2)")
+    return ",".join(out)
 
 
 def is_linux() -> bool:

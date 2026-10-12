@@ -12,7 +12,7 @@ from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Grid, Horizontal, VerticalScroll
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -65,7 +65,7 @@ class ConfirmScreen(ModalScreen[bool]):
         self.question = question
 
     def compose(self) -> ComposeResult:
-        with Grid(id="confirm"):
+        with Vertical(id="confirm"):
             yield Label(self.question, id="question")
             with Horizontal(id="buttons"):
                 yield Button("Yes", variant="error", id="yes")
@@ -118,8 +118,16 @@ class TargetScreen(ModalScreen[Settings | None]):
                         disabled=mode == "bridge" and not is_linux(),
                         name=mode,
                     )
-            yield Input(self.current.proxy_host or "", placeholder="proxy host (custom only)", id="host")
+            yield Label("Proxy host [dim](custom only)[/]")
+            yield Input(self.current.proxy_host or "", placeholder="e.g. 192.168.1.50", id="host")
+            yield Label("Proxy port")
             yield Input(str(self.current.local_port), placeholder="proxy port", id="port", type="integer")
+            yield Label("Redirected TCP ports")
+            yield Input(
+                self.current.redirected_tcp_ports,
+                placeholder="e.g. 80,443,8000:8100",
+                id="ports",
+            )
             yield Label("", id="error")
             with Horizontal(id="buttons"):
                 yield Button("Save", variant="primary", id="save")
@@ -145,10 +153,12 @@ class TargetScreen(ModalScreen[Settings | None]):
         mode = self._mode()
         host = self.query_one("#host", Input).value.strip() or None
         port = self.query_one("#port", Input).value.strip()
+        ports = self.query_one("#ports", Input).value.strip()
         values = {
             "redirect": mode,
             "local_port": int(port) if port else self.current.local_port,
             "proxy_host": host if mode == "custom" else self.current.proxy_host,
+            "redirected_tcp_ports": ports or self.current.redirected_tcp_ports,
         }
         try:
             new = settings_mod.load(self.path, **values)
