@@ -47,11 +47,22 @@ Only the client endpoint (`SERVERURL`) depends on your LAN IP. If it changes, th
 
 ## Install / run
 
+From a checkout:
+
 ```bash
 uv run vpn-proxy              # TUI
 uv run vpn-proxy start        # or any subcommand
-uv tool install .             # optional: puts `vpn-proxy` on PATH
 ```
+
+Installed on PATH as `vpn-proxy`:
+
+```bash
+pipx install .                                          # from a checkout
+pipx install git+https://github.com/ojack69/vpn-proxy.git
+uv tool install .                                       # same, with uv
+```
+
+`python -m vpn_proxy` also works.
 
 ## Configuration
 
